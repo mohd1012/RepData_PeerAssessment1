@@ -1,25 +1,158 @@
 ---
 title: "Reproducible Research: Peer Assessment 1"
+author: mohamed elkhamisy
 output: 
   html_document:
     keep_md: true
 ---
-
+## Introduction
+This assignment is a case study of analysing a collected data for monitoring the number of steps that some individual has made over a period of two months during October and November, 2012.The data has been recorded by an activity monotoring device at 5 minutes interval through out the day. Here we are going to answer some questions that describe the steps petterns during the different day intervals and also the weekday pattern versus
+the weekend one.
 
 ## Loading and preprocessing the data
+
+```{r,results=F , eval=F}
+# getting the data csv file
+furl<- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip"
+temp <- tempfile()
+download.file(furl,temp)
+unzip(temp)
+unlink(temp)
+```
+
+
+```{r}
+# loading needed packages
+library(dplyr) #todo supress warning
+library(ggplot2)
+library(lubridate)
+# read into a data.table
+library(data.table)
+# read to data table dt
+dt<-fread("activity.csv", colClasses=list(character=c("date"),
+                                          integer=c("steps","interval")) )  
+
+# transform  date variable from character type to date one.
+dt$date<-as.Date(dt$date,"%Y-%m-%d")
+
+# dtd is data table dplyr
+dtd<- tbl_dt(dt)
+```
 
 
 
 ## What is mean total number of steps taken per day?
 
+  In order to calculate total number of steps taken per day, first  the observations are  grouped by date so that each particular is an individual goup, then sum the steps taken in each day group.Since the study was made over duration of two months, the result consists of 61 values associated with the 61 days of the study.
+ 
+```{r,cache=TRUE}
+
+# group by date and sum over steps in each date group
+by_date <- dtd%>%group_by(date)%>%summarize(total=sum(steps,na.rm=T))
+
+ggplot(data = by_date,aes(x=total))+
+ geom_histogram(fill="green",color="black",binwidth=1000)+
+ ylab("frequency")+xlab("steps")+
+ ggtitle("Total number of steps taken per day")
+
+```
+### Mean and Median without NA values 
+
+```{r,cache=T}
+
+mn <- round(mean(by_date$total),2)
+md <- median(by_date$total)
+
+```
+
+The mean of the total number of steps taken per day is `r mn` while the median is `r md `.Both of results are computed with ignoring the missing values.
 
 
 ## What is the average daily activity pattern?
+first step is grouping by 5-minutes intervals then taking the average of each interval.
+
+```{r}
+
+# helper function to display labels 
+timeHM_formatter <- function(x) {
+ h <- floor(x/100)
+ m <- floor(x %% 100)
+ lab <- sprintf("%02d:%02d", h, m) # Format the strings as HH:MM
+ return(lab)
+}
+
+by_interval<- dtd %>% group_by(interval)%>%
+ summarise(avrg.steps= mean(steps,na.rm=T))
+
+#index of max value of steps
+max_index <- which.max(by_interval$avrg.steps)
+
+# retrive the interval by index
+max_interval<- by_interval$interval[max_index]
+
+p<-ggplot(data=by_interval,aes(x=interval,y= avrg.steps))+geom_line()
+
+p+scale_x_continuous(name= "time(hh:mm)", 
+                     breaks =seq(0,max(by_interval$interval),by=200),
+                     labels=timeHM_formatter ) +
+          labs(y="average steps",
+               title="average steps of 5-minute intervals")
+
+```
+
+The 5-minutes interval that on average contains the maximum number of steps is at 
+`r max_interval`.
 
 
 
 ## Imputing missing values
+### Misisng values count 
+```{r}
+na_rows<- sum(!is.na(dtd$steps))
 
+```
+The count of missing values in the  dataset is `r na_rows`.
+
+ To handle the biase introduced by removing missing values, each missing values is replaced with its  its respective 5-minutes average steps.
+
+
+```{r}
+
+ndtd<- dtd
+
+for(i in 1:nrow(dtd)){
+ interval.curr <- dtd[i,3]
+ ndtd$steps[i]<- if(!is.na(dtd$steps[i])) dtd$steps[i] else
+                                            by_interval[interval==interval.curr,2]
+}
+
+#just change to use no-missing data
+by_date_noNA<- ndtd %>% group_by(date)%>%
+ summarise(sum.steps= sum(steps)) # no need to use na.rm
+
+
+ggplot(data=by_date_noNA,aes(x= sum.steps))+
+   geom_histogram(binwidth=1000)+
+   ylab("frequency")+xlab("steps per day")+
+   ggtitle("Total number of steps taken per day with filling NAs")
+
+mn_nona <- round(mean(by_date_noNA$sum.steps),2)
+md_nona <- median(by_date_noNA$sum.steps)
+
+```
+The new mean and median of total steps per day with filling NA values are `r mn_nona` and `r md_nona`,respectively.The median value does not change while the mean has increased slighltly because of adding more data that are higher than median.
 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+```{r}
+dtd<- dtd%>% mutate(dayType=ifelse(wday(date) %in%c(1,7),"weekend","weekday"))%>%
+ mutate(dayType=factor(dayType))
+
+
+g5<- dtd %>% group_by(interval,dayType)%>%summarise(mean_steps=mean(steps,na.rm=T))
+
+
+ggplot(data=g5,aes(x= interval,y=mean_steps))+geom_line()+facet_grid(dayType~.)
+
+```
+
